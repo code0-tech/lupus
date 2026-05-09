@@ -37,11 +37,7 @@ impl Codec for JsonCodec {
         };
 
         let value = data_to_json_value(data)?;
-        if ctx.policy.pretty {
-            serde_json::to_vec_pretty(&value).map_err(ConvertError::from)
-        } else {
-            serde_json::to_vec(&value).map_err(ConvertError::from)
-        }
+        serde_json::to_vec(&value).map_err(ConvertError::from)
     }
 }
 

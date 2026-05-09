@@ -1,0 +1,8 @@
+[package]
+name = "lupus-web"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+lupus = { path = "../lupus" }
+maud.workspace = true

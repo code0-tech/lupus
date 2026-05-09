@@ -34,7 +34,7 @@ impl Codec for XmlCodec {
             });
         };
 
-        Ok(write_xml(markup, ctx.policy.pretty).into_bytes())
+        Ok(write_xml(markup).into_bytes())
     }
 }
 
@@ -290,19 +290,15 @@ impl<'a> XmlParser<'a> {
     }
 }
 
-fn write_xml(markup: &Markup, pretty: bool) -> String {
+fn write_xml(markup: &Markup) -> String {
     let mut output = String::new();
-    write_node(&markup.root, pretty, 0, &mut output);
+    write_node(&markup.root, 0, &mut output);
     output
 }
 
-fn write_node(node: &MarkupNode, pretty: bool, depth: usize, output: &mut String) {
-    if pretty {
-        output.push_str(&"  ".repeat(depth));
-    }
-
+fn write_node(node: &MarkupNode, depth: usize, output: &mut String) {
     match node {
-        MarkupNode::Element(element) => write_element(element, pretty, depth, output),
+        MarkupNode::Element(element) => write_element(element, depth, output),
         MarkupNode::Text(value) => output.push_str(&escape_text(value)),
         MarkupNode::CData(value) => {
             output.push_str("<![CDATA[");
@@ -320,13 +316,9 @@ fn write_node(node: &MarkupNode, pretty: bool, depth: usize, output: &mut String
             output.push('>');
         }
     }
-
-    if pretty {
-        output.push('\n');
-    }
 }
 
-fn write_element(element: &MarkupElement, pretty: bool, depth: usize, output: &mut String) {
+fn write_element(element: &MarkupElement, depth: usize, output: &mut String) {
     output.push('<');
     output.push_str(&element.name);
     for attribute in &element.attributes {
@@ -344,8 +336,8 @@ fn write_element(element: &MarkupElement, pretty: bool, depth: usize, output: &m
 
     output.push('>');
 
-    let multiline = pretty
-        && element
+    let multiline = 
+        element
             .children
             .iter()
             .any(|child| matches!(child, MarkupNode::Element(_)));
@@ -354,7 +346,7 @@ fn write_element(element: &MarkupElement, pretty: bool, depth: usize, output: &m
     }
 
     for child in &element.children {
-        write_node(child, pretty && multiline, depth + 1, output);
+        write_node(child, depth + 1, output);
     }
 
     if multiline {
@@ -412,15 +404,12 @@ fn unescape_xml(input: &str) -> Result<String, ConvertError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::ConvertPolicy;
 
     #[test]
     fn xml_codec_decodes_and_encodes_elements() {
         let codec = XmlCodec;
-        let policy = ConvertPolicy::default();
         let ctx = DecodeContext {
             schema: None,
-            policy,
         };
         let artifact = codec
             .decode(br#"<user id="7"><name>Ada</name></user>"#, &ctx)
@@ -450,13 +439,8 @@ mod tests {
     #[test]
     fn xml_codec_preserves_comments_when_encoding_markup() {
         let codec = XmlCodec;
-        let policy = ConvertPolicy {
-            allow_lossy: false,
-            pretty: false,
-        };
         let ctx = DecodeContext {
             schema: None,
-            policy: policy.clone(),
         };
         let artifact = codec.decode(b"<root><!--x--></root>", &ctx).unwrap();
         let encoded = codec
@@ -464,7 +448,6 @@ mod tests {
                 &artifact,
                 &EncodeContext {
                     schema: None,
-                    policy,
                 },
             )
             .unwrap();
