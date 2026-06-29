@@ -1,0 +1,10 @@
+{
+  "user": {
+    "@id": "7",
+    "name": "Ada",
+    "email": [
+      "ada@example.com",
+      "ada@work.example"
+    ]
+  }
+}
