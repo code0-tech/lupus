@@ -104,13 +104,7 @@ impl Engine {
             (Artifact::Text(text), ArtifactKind::Markup) => {
                 Ok(Artifact::Markup(data_into_markup(Data::String(text))?))
             }
-            (Artifact::Binary(bytes), ArtifactKind::Text) => {
-                let text = String::from_utf8(bytes).map_err(|err| {
-                    ConvertError::InvalidConversion(format!("binary is not valid utf-8: {err}"))
-                })?;
-                Ok(Artifact::Text(text))
-            }
-            (artifact, target) => Err(ConvertError::WrongArtifact {
+           (artifact, target) => Err(ConvertError::WrongArtifact {
                 expected: target,
                 found: artifact.kind(),
             }),
