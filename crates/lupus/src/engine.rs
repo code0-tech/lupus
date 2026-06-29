@@ -125,97 +125,92 @@ mod tests {
     use crate::schema::{DecodeContext, EncodeContext, JsonSchema};
 
     #[test]
-    fn text_into_data_raw() {
+    fn text_into_data_raw() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = Engine::new();
         engine.register(JsonCodec);
         engine.register(TextCodec);
 
         let input = "This is just a long long string";
-        let result = engine
-            .convert(
-                input.as_bytes(),
-                Format::Text,
-                Format::Json,
-                &DecodeContext::default(),
-                &EncodeContext::default(),
-            )
-            .unwrap();
+        let result = engine.convert(
+            input.as_bytes(),
+            Format::Text,
+            Format::Json,
+            &DecodeContext,
+            &EncodeContext::default(),
+        )?;
 
         assert_eq!(result, br#""This is just a long long string""#);
+        Ok(())
     }
 
     #[test]
-    fn normalizing_text_to_data_wraps_the_text_as_a_string() {
+    fn normalizing_text_to_data_wraps_the_text_as_a_string()
+    -> Result<(), Box<dyn std::error::Error>> {
         let engine = Engine::new();
 
         assert_eq!(
-            engine
-                .normalize_for_target(
-                    Artifact::Text("unstructured".to_string()),
-                    ArtifactKind::Data,
-                )
-                .unwrap(),
+            engine.normalize_for_target(
+                Artifact::Text("unstructured".to_string()),
+                ArtifactKind::Data,
+            )?,
             Artifact::Data(Data::String("unstructured".to_string()))
         );
+        Ok(())
     }
 
     #[test]
-    fn json_xml_json_round_trip_does_not_add_formatting_text() {
+    fn json_xml_json_round_trip_does_not_add_formatting_text()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = Engine::new();
         engine.register(JsonCodec);
         engine.register(XmlCodec);
-        let decode_ctx = DecodeContext::default();
+        let decode_ctx = DecodeContext;
         let encode_ctx = EncodeContext::default();
         let json =
             br#"{"user":{"@id":"7","email":["ada@example.com","ada@work.example"],"name":"Ada"}}"#;
 
-        let xml = engine
-            .convert(json, Format::Json, Format::Xml, &decode_ctx, &encode_ctx)
-            .unwrap();
+        let xml = engine.convert(json, Format::Json, Format::Xml, &decode_ctx, &encode_ctx)?;
         assert_eq!(
             xml,
             br#"<user id="7"><email>ada@example.com</email><email>ada@work.example</email><name>Ada</name></user>"#
         );
 
-        let result = engine
-            .convert(&xml, Format::Xml, Format::Json, &decode_ctx, &encode_ctx)
-            .unwrap();
+        let result = engine.convert(&xml, Format::Xml, Format::Json, &decode_ctx, &encode_ctx)?;
         assert_eq!(result, json);
+        Ok(())
     }
 
     #[test]
-    fn codecs_pretty_print_structured_output_when_requested() {
+    fn codecs_pretty_print_structured_output_when_requested()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = Engine::new();
         engine.register(JsonCodec);
         engine.register(XmlCodec);
-        let decode_ctx = DecodeContext::default();
+        let decode_ctx = DecodeContext;
         let encode_ctx = EncodeContext { pretty: true };
 
-        let xml = engine
-            .convert(
-                br#"{"user":{"name":"Ada","email":"ada@example.com"}}"#,
-                Format::Json,
-                Format::Xml,
-                &decode_ctx,
-                &encode_ctx,
-            )
-            .unwrap();
+        let xml = engine.convert(
+            br#"{"user":{"name":"Ada","email":"ada@example.com"}}"#,
+            Format::Json,
+            Format::Xml,
+            &decode_ctx,
+            &encode_ctx,
+        )?;
         assert_eq!(
             xml,
             b"<user>\n  <email>ada@example.com</email>\n  <name>Ada</name>\n</user>"
         );
 
-        let json = engine
-            .convert(&xml, Format::Xml, Format::Json, &decode_ctx, &encode_ctx)
-            .unwrap();
+        let json = engine.convert(&xml, Format::Xml, Format::Json, &decode_ctx, &encode_ctx)?;
         assert_eq!(
             json,
             b"{\n  \"user\": {\n    \"email\": \"ada@example.com\",\n    \"name\": \"Ada\"\n  }\n}"
         );
+        Ok(())
     }
 
     #[test]
-    fn canonical_xml_array_converts_to_csv() {
+    fn canonical_xml_array_converts_to_csv() -> Result<(), Box<dyn std::error::Error>> {
         let mut engine = Engine::new();
         engine.register(XmlCodec);
         engine.register(CsvCodec);
@@ -230,24 +225,24 @@ mod tests {
   </item>
 </data>"#;
 
-        let csv = engine
-            .convert(
-                xml,
-                Format::Xml,
-                Format::Csv,
-                &DecodeContext::default(),
-                &EncodeContext::default(),
-            )
-            .unwrap();
+        let csv = engine.convert(
+            xml,
+            Format::Xml,
+            Format::Csv,
+            &DecodeContext,
+            &EncodeContext::default(),
+        )?;
 
         assert_eq!(
             csv,
             b"email,name\nada@example.com,Ada Lovelace\ngrace@example.com,Grace Hopper\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn validate_decodes_xml_before_applying_json_schema() {
+    fn validate_decodes_xml_before_applying_json_schema() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut engine = Engine::new();
         engine.register(XmlCodec);
         let schema = JsonSchema {
@@ -268,13 +263,12 @@ mod tests {
             .to_string(),
         };
 
-        engine
-            .validate(
-                b"<user><name>Ada</name></user>",
-                Format::Xml,
-                &schema,
-                &DecodeContext::default(),
-            )
-            .unwrap();
+        engine.validate(
+            b"<user><name>Ada</name></user>",
+            Format::Xml,
+            &schema,
+            &DecodeContext,
+        )?;
+        Ok(())
     }
 }

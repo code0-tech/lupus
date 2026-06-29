@@ -129,7 +129,7 @@ mod tests {
     use crate::schema::{DecodeContext, EncodeContext};
 
     #[test]
-    fn protobuf_value_object_round_trips_nested_data() {
+    fn protobuf_value_object_round_trips_nested_data() -> Result<(), Box<dyn std::error::Error>> {
         let data = Data::Object(BTreeMap::from([(
             "user".to_string(),
             Data::Object(BTreeMap::from([
@@ -142,13 +142,12 @@ mod tests {
             ])),
         )]));
         let codec = ProtobufCodec;
-        let encoded = codec
-            .encode(&Artifact::Data(data.clone()), &EncodeContext::default())
-            .unwrap();
-        let decoded = codec.decode(&encoded, &DecodeContext::default()).unwrap();
+        let encoded = codec.encode(&Artifact::Data(data.clone()), &EncodeContext::default())?;
+        let decoded = codec.decode(&encoded, &DecodeContext)?;
         assert_eq!(decoded, Artifact::Data(data));
-        let rendered = String::from_utf8(encoded).unwrap();
+        let rendered = String::from_utf8(encoded)?;
         assert!(rendered.contains("\"structValue\""));
         assert!(rendered.contains("\"stringValue\":\"Ada\""));
+        Ok(())
     }
 }

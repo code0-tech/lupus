@@ -185,9 +185,10 @@ mod tests {
     use super::{parse_csv, write_csv};
 
     #[test]
-    fn csv_round_trips_quoted_flat_rows() {
+    fn csv_round_trips_quoted_flat_rows() -> Result<(), Box<dyn std::error::Error>> {
         let input = "email,name\nada@example.com,\"Ada, Countess\"\n";
-        let data = parse_csv(input).unwrap();
-        assert_eq!(write_csv(&data).unwrap(), input);
+        let data = parse_csv(input)?;
+        assert_eq!(write_csv(&data)?, input);
+        Ok(())
     }
 }

@@ -130,14 +130,12 @@ mod tests {
     use crate::schema::{DecodeContext, EncodeContext};
 
     #[test]
-    fn form_round_trips_flat_string_objects() {
+    fn form_round_trips_flat_string_objects() -> Result<(), Box<dyn std::error::Error>> {
         let codec = HttpFormCodec;
         let encoded = b"email=grace%40example.com&name=Grace+Hopper";
-        let artifact = codec.decode(encoded, &DecodeContext::default()).unwrap();
+        let artifact = codec.decode(encoded, &DecodeContext)?;
         assert!(matches!(artifact, Artifact::Data(Data::Object(_))));
-        assert_eq!(
-            codec.encode(&artifact, &EncodeContext::default()).unwrap(),
-            encoded
-        );
+        assert_eq!(codec.encode(&artifact, &EncodeContext::default())?, encoded);
+        Ok(())
     }
 }

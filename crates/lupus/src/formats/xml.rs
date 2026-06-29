@@ -408,12 +408,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn xml_codec_decodes_and_encodes_elements() {
+    fn xml_codec_decodes_and_encodes_elements() -> Result<(), Box<dyn std::error::Error>> {
         let codec = XmlCodec;
         let ctx = DecodeContext;
-        let artifact = codec
-            .decode(br#"<user id="7"><name>Ada</name></user>"#, &ctx)
-            .unwrap();
+        let artifact = codec.decode(br#"<user id="7"><name>Ada</name></user>"#, &ctx)?;
 
         let Artifact::Markup(markup) = artifact else {
             panic!("expected markup");
@@ -434,17 +432,18 @@ mod tests {
                 })],
             })
         );
+        Ok(())
     }
 
     #[test]
-    fn xml_codec_preserves_comments_when_encoding_markup() {
+    fn xml_codec_preserves_comments_when_encoding_markup() -> Result<(), Box<dyn std::error::Error>>
+    {
         let codec = XmlCodec;
         let ctx = DecodeContext;
-        let artifact = codec.decode(b"<root><!--x--></root>", &ctx).unwrap();
-        let encoded = codec
-            .encode(&artifact, &EncodeContext { pretty: false })
-            .unwrap();
+        let artifact = codec.decode(b"<root><!--x--></root>", &ctx)?;
+        let encoded = codec.encode(&artifact, &EncodeContext { pretty: false })?;
 
-        assert_eq!(String::from_utf8(encoded).unwrap(), "<root><!--x--></root>");
+        assert_eq!(String::from_utf8(encoded)?, "<root><!--x--></root>");
+        Ok(())
     }
 }
