@@ -15,17 +15,13 @@ impl Codec for TextCodec {
         ArtifactKind::Text
     }
 
-    fn decode(&self, input: &[u8], _ctx: &DecodeContext<'_>) -> Result<Artifact, ConvertError> {
+    fn decode(&self, input: &[u8], _ctx: &DecodeContext) -> Result<Artifact, ConvertError> {
         let text = std::str::from_utf8(input)
-            .map_err(|err| ConvertError::Parse(format!("text is not valid utf-8: {err}")))?;
+            .map_err(|err| ConvertError::Decoding(format!("text is not valid utf-8: {err}")))?;
         Ok(Artifact::Text(text.to_string()))
     }
 
-    fn encode(
-        &self,
-        artifact: &Artifact,
-        _ctx: &EncodeContext<'_>,
-    ) -> Result<Vec<u8>, ConvertError> {
+    fn encode(&self, artifact: &Artifact, _ctx: &EncodeContext) -> Result<Vec<u8>, ConvertError> {
         let Artifact::Text(text) = artifact else {
             return Err(ConvertError::WrongArtifact {
                 expected: ArtifactKind::Text,

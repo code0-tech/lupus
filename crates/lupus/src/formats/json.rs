@@ -18,17 +18,13 @@ impl Codec for JsonCodec {
         ArtifactKind::Data
     }
 
-    fn decode(&self, input: &[u8], _ctx: &DecodeContext<'_>) -> Result<Artifact, ConvertError> {
+    fn decode(&self, input: &[u8], _ctx: &DecodeContext) -> Result<Artifact, ConvertError> {
         let value: serde_json::Value =
-            serde_json::from_slice(input).map_err(|err| ConvertError::Parse(err.to_string()))?;
+            serde_json::from_slice(input).map_err(|err| ConvertError::Decoding(err.to_string()))?;
         Ok(Artifact::Data(json_value_to_data(value)?))
     }
 
-    fn encode(
-        &self,
-        artifact: &Artifact,
-        ctx: &EncodeContext<'_>,
-    ) -> Result<Vec<u8>, ConvertError> {
+    fn encode(&self, artifact: &Artifact, ctx: &EncodeContext) -> Result<Vec<u8>, ConvertError> {
         let Artifact::Data(data) = artifact else {
             return Err(ConvertError::WrongArtifact {
                 expected: ArtifactKind::Data,
@@ -37,10 +33,13 @@ impl Codec for JsonCodec {
         };
 
         let value = data_to_json_value(data)?;
-        serde_json::to_vec(&value).map_err(ConvertError::from)
+        if ctx.pretty {
+            serde_json::to_vec_pretty(&value).map_err(ConvertError::from)
+        } else {
+            serde_json::to_vec(&value).map_err(ConvertError::from)
+        }
     }
 }
-
 
 fn json_value_to_data(value: serde_json::Value) -> Result<Data, ConvertError> {
     match value {
@@ -73,7 +72,7 @@ fn json_value_to_data(value: serde_json::Value) -> Result<Data, ConvertError> {
     }
 }
 
-fn data_to_json_value(data: &Data) -> Result<serde_json::Value, ConvertError> {
+pub(crate) fn data_to_json_value(data: &Data) -> Result<serde_json::Value, ConvertError> {
     match data {
         Data::Null => Ok(serde_json::Value::Null),
         Data::Bool(value) => Ok(serde_json::Value::Bool(*value)),
@@ -99,5 +98,3 @@ fn data_to_json_value(data: &Data) -> Result<serde_json::Value, ConvertError> {
             .map(serde_json::Value::Object),
     }
 }
-
-

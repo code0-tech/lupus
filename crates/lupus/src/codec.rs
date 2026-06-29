@@ -6,7 +6,6 @@ use crate::schema::{DecodeContext, EncodeContext};
 pub trait Codec {
     fn format(&self) -> Format;
     fn artifact_kind(&self) -> ArtifactKind;
-    fn decode(&self, input: &[u8], ctx: &DecodeContext<'_>) -> Result<Artifact, ConvertError>;
-    fn encode(&self, artifact: &Artifact, ctx: &EncodeContext<'_>)
-    -> Result<Vec<u8>, ConvertError>;
+    fn decode(&self, input: &[u8], ctx: &DecodeContext) -> Result<Artifact, ConvertError>;
+    fn encode(&self, artifact: &Artifact, ctx: &EncodeContext) -> Result<Vec<u8>, ConvertError>;
 }

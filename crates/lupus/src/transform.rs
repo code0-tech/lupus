@@ -29,12 +29,37 @@ pub fn data_into_markup(data: Data) -> Result<Markup, ConvertError> {
 pub fn markup_into_data(markup: Markup) -> Result<Data, ConvertError> {
     match &markup.root {
         MarkupNode::Element(element) => {
+            if let Some(items) = canonical_array_items(element) {
+                return items
+                    .into_iter()
+                    .map(element_to_data)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Data::Array);
+            }
+
             let mut root = BTreeMap::new();
             root.insert(element.name.clone(), element_to_data(element)?);
             Ok(Data::Object(root))
         }
         node => node_to_data(node),
     }
+}
+
+fn canonical_array_items(element: &MarkupElement) -> Option<Vec<&MarkupElement>> {
+    if element.name != DEFAULT_ROOT || !element.attributes.is_empty() {
+        return None;
+    }
+
+    let mut items = Vec::new();
+    for child in &element.children {
+        match child {
+            MarkupNode::Element(item) if item.name == DEFAULT_ITEM => items.push(item),
+            MarkupNode::Text(text) if text.trim().is_empty() => {}
+            _ => return None,
+        }
+    }
+
+    (!items.is_empty()).then_some(items)
 }
 
 pub fn data_to_text(data: &Data) -> String {
@@ -107,11 +132,10 @@ fn node_to_data(node: &MarkupNode) -> Result<Data, ConvertError> {
     match node {
         MarkupNode::Element(element) => element_to_data(element),
         MarkupNode::Text(text) | MarkupNode::CData(text) => Ok(Data::String(text.clone())),
-        MarkupNode::Comment(_) | MarkupNode::Doctype(_)  => Ok(Data::Null),
-        MarkupNode::Comment(_) => Err(ConvertError::LossyConversionRefused(
+        MarkupNode::Comment(_) => Err(ConvertError::InformationLoss(
             "comments are not represented in data".to_string(),
         )),
-        MarkupNode::Doctype(_) => Err(ConvertError::LossyConversionRefused(
+        MarkupNode::Doctype(_) => Err(ConvertError::InformationLoss(
             "doctypes are not represented in data".to_string(),
         )),
     }
@@ -137,14 +161,13 @@ fn element_to_data(element: &MarkupElement) -> Result<Data, ConvertError> {
             MarkupNode::Text(value) | MarkupNode::CData(value) => {
                 text.push_str(value);
             }
-            MarkupNode::Comment(_) | MarkupNode::Doctype(_)  => {}
             MarkupNode::Comment(_) => {
-                return Err(ConvertError::LossyConversionRefused(
+                return Err(ConvertError::InformationLoss(
                     "comments are not represented in data".to_string(),
                 ));
             }
             MarkupNode::Doctype(_) => {
-                return Err(ConvertError::LossyConversionRefused(
+                return Err(ConvertError::InformationLoss(
                     "doctypes are not represented in data".to_string(),
                 ));
             }
@@ -158,46 +181,13 @@ fn element_to_data(element: &MarkupElement) -> Result<Data, ConvertError> {
             Ok(Data::String(text))
         }
     } else {
-        if !text.is_empty() {
+        // Whitespace around child elements is normally XML formatting, not
+        // application data. Keep meaningful mixed content, but do not expose
+        // indentation as a synthetic "#text" field.
+        if !text.trim().is_empty() {
             fields.insert(TEXT_FIELD.to_string(), Data::String(text));
         }
         Ok(Data::Object(fields))
-    }
-}
-
-fn reject_lossy_markup(node: &MarkupNode) -> Result<(), ConvertError> {
-    match node {
-        MarkupNode::Element(element) => {
-            let has_text = element
-                .children
-                .iter()
-                .any(|child| matches!(child, MarkupNode::Text(_) | MarkupNode::CData(_)));
-            let has_elements = element
-                .children
-                .iter()
-                .any(|child| matches!(child, MarkupNode::Element(_)));
-
-            if has_text && has_elements {
-                return Err(ConvertError::LossyConversionRefused(
-                    "data cannot preserve mixed child ordering".to_string(),
-                ));
-            }
-
-            for child in &element.children {
-                reject_lossy_markup(child)?;
-            }
-            Ok(())
-        }
-        MarkupNode::Text(_) => Ok(()),
-        MarkupNode::CData(_) => Err(ConvertError::LossyConversionRefused(
-            "data cannot preserve CDATA nodes".to_string(),
-        )),
-        MarkupNode::Comment(_) => Err(ConvertError::LossyConversionRefused(
-            "data cannot preserve comments".to_string(),
-        )),
-        MarkupNode::Doctype(_) => Err(ConvertError::LossyConversionRefused(
-            "data cannot preserve doctypes".to_string(),
-        )),
     }
 }
 
@@ -218,8 +208,8 @@ fn insert_repeated_field(fields: &mut BTreeMap<String, Data>, name: String, valu
 
 fn markup_name(name: &str) -> Result<String, ConvertError> {
     let sanitized = sanitize_markup_name(name);
-    if sanitized != name  {
-        return Err(ConvertError::LossyConversionRefused(format!(
+    if sanitized != name {
+        return Err(ConvertError::InformationLoss(format!(
             "name {name:?} must be sanitized to {sanitized:?}"
         )));
     }

@@ -9,10 +9,11 @@ pub enum ConvertError {
         expected: ArtifactKind,
         found: ArtifactKind,
     },
-    LossyConversionRefused(String),
+    InformationLoss(String),
+    Validation(String),
     InvalidConversion(String),
-    Parse(String),
-    Serialization(String),
+    Decoding(String),
+    Encoding(String),
 }
 
 impl fmt::Display for ConvertError {
@@ -25,14 +26,15 @@ impl fmt::Display for ConvertError {
                     "wrong artifact type: expected {expected:?}, found {found:?}"
                 )
             }
-            ConvertError::LossyConversionRefused(message) => {
-                write!(f, "lossy conversion refused: {message}")
+            ConvertError::InformationLoss(message) => {
+                write!(f, "conversion would lose information: {message}")
             }
+            ConvertError::Validation(message) => write!(f, "validation failed: {message}"),
             ConvertError::InvalidConversion(message) => {
                 write!(f, "invalid conversion: {message}")
             }
-            ConvertError::Parse(message) => write!(f, "parse error: {message}"),
-            ConvertError::Serialization(message) => write!(f, "serialization error: {message}"),
+            ConvertError::Decoding(message) => write!(f, "decoding failed: {message}"),
+            ConvertError::Encoding(message) => write!(f, "encoding failed: {message}"),
         }
     }
 }
@@ -41,6 +43,6 @@ impl Error for ConvertError {}
 
 impl From<serde_json::Error> for ConvertError {
     fn from(value: serde_json::Error) -> Self {
-        ConvertError::Serialization(value.to_string())
+        ConvertError::Encoding(value.to_string())
     }
 }

@@ -6,7 +6,6 @@ pub enum Artifact {
     Data(Data),
     Markup(Markup),
     Text(String),
-    Binary(Vec<u8>),
 }
 
 impl Artifact {
@@ -15,7 +14,6 @@ impl Artifact {
             Artifact::Data(_) => ArtifactKind::Data,
             Artifact::Markup(_) => ArtifactKind::Markup,
             Artifact::Text(_) => ArtifactKind::Text,
-            Artifact::Binary(_) => ArtifactKind::Binary,
         }
     }
 }
@@ -25,5 +23,4 @@ pub enum ArtifactKind {
     Data,
     Markup,
     Text,
-    Binary,
 }

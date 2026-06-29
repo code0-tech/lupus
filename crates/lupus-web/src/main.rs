@@ -1,18 +1,97 @@
+use lupus::engine::Engine;
+use lupus::error::ConvertError;
+use lupus::format::Format;
+use lupus::schema::{DecodeContext, EncodeContext, JsonSchema};
+use maud::{DOCTYPE, Markup, html};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
-use lupus::engine::Engine;
-use lupus::error::ConvertError;
-use lupus::format::Format;
-use lupus::formats::{JsonCodec, TextCodec, XmlCodec};
-use lupus::schema::{DecodeContext, EncodeContext};
-use maud::{DOCTYPE, Markup, html};
 
 const SAMPLE_JSON: &str = include_str!("./sample.json");
 const SAMPLE_XML: &str = include_str!("./sample.xml");
 const SAMPLE_TEXT: &str = include_str!("./sample.txt");
+const SAMPLE_JSON_CSV: &str = r#"[
+  {
+    "email": "ada@example.com",
+    "name": "Ada Lovelace"
+  },
+  {
+    "email": "grace@example.com",
+    "name": "Grace Hopper"
+  }
+]"#;
+const SAMPLE_SCHEMA: &str = r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["name", "email"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 2
+    },
+    "email": {
+      "type": "string",
+      "format": "email"
+    }
+  },
+  "additionalProperties": false
+}"#;
+const SAMPLE_VALIDATION_INPUT: &str = r#"{
+  "name": "Ada Lovelace",
+  "email": "ada@example.com"
+}"#;
+const SAMPLE_VALIDATION_XML: &str = r#"<user>
+  <name>Ada Lovelace</name>
+  <email>ada@example.com</email>
+</user>"#;
+const SAMPLE_VALIDATION_XML_SCHEMA: &str = r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["user"],
+  "properties": {
+    "user": {
+      "type": "object",
+      "required": ["name", "email"],
+      "properties": {
+        "name": { "type": "string", "minLength": 2 },
+        "email": { "type": "string", "format": "email" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}"#;
+const SAMPLE_VALIDATION_CSV: &str =
+    "email,name\nada@example.com,Ada Lovelace\ngrace@example.com,Grace Hopper\n";
+const SAMPLE_VALIDATION_CSV_SCHEMA: &str = r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": ["name", "email"],
+    "properties": {
+      "name": { "type": "string", "minLength": 2 },
+      "email": { "type": "string", "format": "email" }
+    },
+    "additionalProperties": false
+  }
+}"#;
+const SAMPLE_VALIDATION_FORM: &str = "email=ada%40example.com&name=Ada+Lovelace";
+const SAMPLE_VALIDATION_TUCANA: &str = r#"{
+  "structValue": {
+    "fields": {
+      "email": {
+        "stringValue": "ada@example.com"
+      },
+      "name": {
+        "stringValue": "Ada Lovelace"
+      }
+    }
+  }
+}"#;
 const CSS: &str = include_str!("./styles.css");
 
 fn main() -> io::Result<()> {
@@ -64,7 +143,7 @@ fn handle_connection(stream: &mut TcpStream) -> io::Result<()> {
             stream,
             404,
             &render_page(PageState {
-                error: Some("not found".to_string()),
+                error: Some(ConvertError::InvalidConversion("not found".to_string())),
                 ..PageState::default()
             }),
         ),
@@ -73,20 +152,26 @@ fn handle_connection(stream: &mut TcpStream) -> io::Result<()> {
 
 #[derive(Debug, Clone)]
 struct PageState {
+    mode: String,
     input: String,
     output: String,
     from: String,
     to: String,
-    error: Option<String>,
+    schema: String,
+    validated: bool,
+    error: Option<ConvertError>,
 }
 
 impl Default for PageState {
     fn default() -> Self {
         Self {
+            mode: "conversion".to_string(),
             input: SAMPLE_JSON.to_string(),
             output: String::new(),
             from: Format::Json.to_string(),
             to: Format::Xml.to_string(),
+            schema: String::new(),
+            validated: false,
             error: None,
         }
     }
@@ -95,6 +180,10 @@ impl Default for PageState {
 fn handle_form(body: &[u8]) -> PageState {
     let form = parse_form(body);
     let mut state = PageState {
+        mode: form
+            .get("mode")
+            .cloned()
+            .unwrap_or_else(|| "conversion".to_string()),
         input: form.get("input").cloned().unwrap_or_default(),
         output: form.get("output").cloned().unwrap_or_default(),
         from: form
@@ -105,50 +194,38 @@ fn handle_form(body: &[u8]) -> PageState {
             .get("to")
             .cloned()
             .unwrap_or_else(|| Format::Xml.to_string()),
+        schema: form.get("schema").cloned().unwrap_or_default(),
+        validated: false,
         error: None,
     };
 
     match form.get("action").map(String::as_str) {
-        Some("sample-json") => {
-            state.input = SAMPLE_JSON.to_string();
-            state.output.clear();
-            state.from = Format::Json.to_string();
-            state.to = Format::Xml.to_string();
+        Some("tab-conversion") => {
+            state.mode = "conversion".to_string();
         }
-        Some("sample-xml") => {
-            state.input = SAMPLE_XML.to_string();
-            state.output.clear();
-            state.from = Format::Xml.to_string();
-            state.to = Format::Json.to_string();
+        Some("tab-validation") => {
+            state.mode = "validation".to_string();
         }
-        Some("sample-text") => {
-            state.input = SAMPLE_TEXT.to_string();
-            state.output.clear();
-            state.from = Format::Text.to_string();
-            state.to = Format::Json.to_string();
-        }
-        Some("preset-json-xml") => {
-            state.from = Format::Json.to_string();
-            state.to = Format::Xml.to_string();
-            if let Err(err) = convert_state(&mut state) {
-                state.output.clear();
-                state.error = Some(err.to_string());
+        Some("validate") => {
+            state.mode = "validation".to_string();
+            match validate_state(&state) {
+                Ok(()) => state.validated = true,
+                Err(err) => state.error = Some(err),
             }
         }
-        Some("preset-xml-json") => {
-            state.from = Format::Xml.to_string();
-            state.to = Format::Json.to_string();
-            if let Err(err) = convert_state(&mut state) {
-                state.output.clear();
-                state.error = Some(err.to_string());
-            }
+        Some("apply-conversion-preset") => {
+            apply_conversion_preset(
+                &mut state,
+                form.get("preset").map(String::as_str).unwrap_or_default(),
+            );
         }
-        Some("preset-text") => {
-            state.to = Format::Text.to_string();
-            if let Err(err) = convert_state(&mut state) {
-                state.output.clear();
-                state.error = Some(err.to_string());
-            }
+        Some("apply-validation-preset") => {
+            apply_validation_preset(
+                &mut state,
+                form.get("validation-preset")
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+            );
         }
         Some("swap") => {
             std::mem::swap(&mut state.from, &mut state.to);
@@ -162,7 +239,7 @@ fn handle_form(body: &[u8]) -> PageState {
         _ => {
             if let Err(err) = convert_state(&mut state) {
                 state.output.clear();
-                state.error = Some(err.to_string());
+                state.error = Some(err);
             }
         }
     }
@@ -170,30 +247,119 @@ fn handle_form(body: &[u8]) -> PageState {
     state
 }
 
-fn convert_state(state: &mut PageState) -> Result<(), ConvertError> {
-    let mut engine = Engine::new();
-    engine.register(JsonCodec);
-    engine.register(TextCodec);
-    engine.register(XmlCodec);
+fn set_validation_preset(state: &mut PageState, format: Format, schema: &str, input: &str) {
+    state.mode = "validation".to_string();
+    state.from = format.to_string();
+    state.schema = schema.to_string();
+    state.input = input.to_string();
+    state.output.clear();
+}
 
-    let decode_ctx = DecodeContext {
-        schema: None,
-    };
-    let encode_ctx = EncodeContext {
-        schema: None,
-    };
+fn apply_conversion_preset(state: &mut PageState, preset: &str) {
+    match preset {
+        "json" => {
+            state.input = SAMPLE_JSON.to_string();
+            state.from = Format::Json.to_string();
+            state.to = Format::Xml.to_string();
+        }
+        "xml" => {
+            state.input = SAMPLE_XML.to_string();
+            state.from = Format::Xml.to_string();
+            state.to = Format::Json.to_string();
+        }
+        "text" => {
+            state.input = SAMPLE_TEXT.to_string();
+            state.from = Format::Text.to_string();
+            state.to = Format::Json.to_string();
+        }
+        "json-csv" => {
+            state.input = SAMPLE_JSON_CSV.to_string();
+            state.from = Format::Json.to_string();
+            state.to = Format::Csv.to_string();
+        }
+        "json-xml" => {
+            state.from = Format::Json.to_string();
+            state.to = Format::Xml.to_string();
+        }
+        "xml-json" => {
+            state.from = Format::Xml.to_string();
+            state.to = Format::Json.to_string();
+        }
+        "extract-text" => state.to = Format::Text.to_string(),
+        _ => {}
+    }
+    state.output.clear();
+}
+
+fn apply_validation_preset(state: &mut PageState, preset: &str) {
+    match preset {
+        "json" => {
+            set_validation_preset(state, Format::Json, SAMPLE_SCHEMA, SAMPLE_VALIDATION_INPUT)
+        }
+        "xml" => set_validation_preset(
+            state,
+            Format::Xml,
+            SAMPLE_VALIDATION_XML_SCHEMA,
+            SAMPLE_VALIDATION_XML,
+        ),
+        "csv" => set_validation_preset(
+            state,
+            Format::Csv,
+            SAMPLE_VALIDATION_CSV_SCHEMA,
+            SAMPLE_VALIDATION_CSV,
+        ),
+        "form" => set_validation_preset(
+            state,
+            Format::HttpForm,
+            SAMPLE_SCHEMA,
+            SAMPLE_VALIDATION_FORM,
+        ),
+        "tucana" => set_validation_preset(
+            state,
+            Format::Protobuf,
+            SAMPLE_SCHEMA,
+            SAMPLE_VALIDATION_TUCANA,
+        ),
+        _ => {}
+    }
+}
+
+fn convert_state(state: &mut PageState) -> Result<(), ConvertError> {
+    let engine = configured_engine();
+    let decode_ctx = DecodeContext;
+    let encode_ctx = EncodeContext { pretty: true };
     let from = normalize_format(&state.from)?;
     let to = normalize_format(&state.to)?;
     let output = engine.convert(state.input.as_bytes(), from, to, &decode_ctx, &encode_ctx)?;
     state.output = String::from_utf8(output).map_err(|err| {
-        ConvertError::Serialization(format!("converted output is not valid utf-8: {err}"))
+        ConvertError::Encoding(format!("converted output is not valid utf-8: {err}"))
     })?;
     Ok(())
 }
 
+fn validate_state(state: &PageState) -> Result<(), ConvertError> {
+    if state.schema.trim().is_empty() {
+        return Err(ConvertError::Decoding(
+            "a JSON Schema document is required".to_string(),
+        ));
+    }
+    let engine = configured_engine();
+    let format = normalize_format(&state.from)?;
+    let schema = JsonSchema {
+        raw: state.schema.clone(),
+    };
+    engine.validate(state.input.as_bytes(), format, &schema, &DecodeContext)
+}
+
+fn configured_engine() -> Engine {
+    Engine::with_default_codecs()
+}
+
 fn render_page(state: PageState) -> Markup {
     let status = if let Some(error) = &state.error {
-        StatusView::Error(error.as_str())
+        StatusView::Error(error)
+    } else if state.validated {
+        StatusView::Valid
     } else if state.output.is_empty() {
         StatusView::Idle
     } else {
@@ -211,59 +377,31 @@ fn render_page(state: PageState) -> Markup {
             }
             body {
                 div class="shell" {
-                    header {
-                        div class="brand" {
-                            span class="brand-mark" { "Lupus" }
-                       }
-                    }
                     main {
                         form method="post" action="/" {
-                            section class="tool-card" {
-                                div class="conversion-bar" {
-                                    (format_select("from", "From", &state.from))
-                                    div class="switch-column" {
-                                        button class="icon-button" type="submit" name="action" value="swap" title="Swap input and output formats" aria-label="Swap input and output formats" { "Swap" }
-                                    }
-                                    (format_select("to", "To", &state.to))
-                                   div class="actions" {
-                                        button class="primary" type="submit" name="action" value="convert" { "Convert" }
-                                    }
-                                }
-                                div class="quick-row" {
-                                    span class="quick-label" { "Presets" }
-                                    button class="chip" type="submit" name="action" value="preset-json-xml" { "JSON to XML" }
-                                    button class="chip" type="submit" name="action" value="preset-xml-json" { "XML to JSON" }
-                                    button class="chip" type="submit" name="action" value="preset-text" { "Extract text" }
-                                }
+                            input type="hidden" name="mode" value=(state.mode);
+                            nav class="tabs" aria-label="Converter tools" {
+                                button
+                                    class=(if state.mode == "conversion" { "tab active" } else { "tab" })
+                                    type="submit"
+                                    name="action"
+                                    value="tab-conversion"
+                                { "Schema conversion" }
+                                button
+                                    class=(if state.mode == "validation" { "tab active" } else { "tab" })
+                                    type="submit"
+                                    name="action"
+                                    value="tab-validation"
+                                { "Schema validation" }
                             }
-                            section class="workspace" {
-                                (editor_panel(
-                                    "Input",
-                                    &format!("{} source", format_label(&state.from)),
-                                    "input",
-                                    &state.input,
-                                    false,
-                                    html! {
-                                        button class="ghost" type="submit" name="action" value="sample-json" { "JSON" }
-                                        button class="ghost" type="submit" name="action" value="sample-xml" { "XML" }
-                                        button class="ghost" type="submit" name="action" value="sample-text" { "Text" }
-                                    },
-                                    text_stats(&state.input),
-                                ))
-                                (editor_panel(
-                                    "Output",
-                                    &format!("{} result", format_label(&state.to)),
-                                    "output",
-                                    &state.output,
-                                    true,
-                                    html! {
-                                        button class="ghost" type="submit" name="action" value="clear-output" { "Clear" }
-                                    },
-                                    text_stats(&state.output),
-                                ))
+                            section class="tab-content" {
+                                @if state.mode == "validation" {
+                                    (validation_tab(&state, status))
+                                } @else {
+                                    (conversion_tab(&state, status))
+                                }
                             }
                         }
-                        (status_panel(status))
                     }
                }
             }
@@ -271,10 +409,107 @@ fn render_page(state: PageState) -> Markup {
     }
 }
 
+fn conversion_tab(state: &PageState, status: StatusView<'_>) -> Markup {
+    html! {
+        section class="tool-card command-bar" {
+            div class="conversion-bar" {
+                (format_select("from", "From", &state.from))
+                div class="switch-column" {
+                    button class="icon-button" type="submit" name="action" value="swap" { "Swap" }
+                }
+                (format_select("to", "To", &state.to))
+                div class="actions" {
+                    button class="primary" type="submit" name="action" value="convert" { "Convert" }
+                }
+            }
+            div class="preset-control" {
+                label class="field" {
+                    span class="field-label" { "Preset" }
+                    select name="preset" {
+                        option value="json" { "JSON sample" }
+                        option value="xml" { "XML sample" }
+                        option value="text" { "Text sample" }
+                        option value="json-csv" { "JSON rows for CSV" }
+                        option value="json-xml" { "JSON → XML" }
+                        option value="xml-json" { "XML → JSON" }
+                        option value="extract-text" { "Extract text" }
+                    }
+                }
+                button type="submit" name="action" value="apply-conversion-preset" { "Apply" }
+            }
+        }
+        (status_panel(status))
+        section class="workspace" {
+            (input_editor(state))
+            (editor_panel(
+                "Output",
+                &format!("{} result", format_label(&state.to)),
+                "output",
+                &state.output,
+                true,
+                html! {
+                    button class="ghost" type="submit" name="action" value="clear-output" { "Clear" }
+                },
+                text_stats(&state.output),
+            ))
+        }
+    }
+}
+
+fn validation_tab(state: &PageState, status: StatusView<'_>) -> Markup {
+    html! {
+        section class="tool-card validation-bar command-bar" {
+            (format_select("from", "Input format", &state.from))
+            div class="preset-control" {
+                label class="field" {
+                    span class="field-label" { "Example" }
+                    select name="validation-preset" {
+                        option value="json" { "JSON object" }
+                        option value="xml" { "XML document" }
+                        option value="csv" { "CSV rows" }
+                        option value="form" { "HTTP Form" }
+                        option value="tucana" { "Tucana Value" }
+                    }
+                }
+                button type="submit" name="action" value="apply-validation-preset" { "Load" }
+            }
+            div class="actions" {
+                button class="primary" type="submit" name="action" value="validate" { "Validate" }
+            }
+        }
+        (status_panel(status))
+        section class="workspace validation-workspace" {
+            (editor_panel(
+                "JSON Schema",
+                "Draft 2020-12 validation schema",
+                "schema",
+                &state.schema,
+                false,
+                Markup::default(),
+                text_stats(&state.schema),
+            ))
+            (input_editor(state))
+        }
+    }
+}
+
+fn input_editor(state: &PageState) -> Markup {
+    editor_panel(
+        "Input",
+        &format!("{} source", format_label(&state.from)),
+        "input",
+        &state.input,
+        false,
+        Markup::default(),
+        text_stats(&state.input),
+    )
+}
+
 enum StatusView<'a> {
     Idle,
     Ready,
-    Error(&'a str),
+    Valid,
+    Error(&'a ConvertError),
 }
 
 struct TextStats {
@@ -288,9 +523,9 @@ fn format_select(name: &'static str, label: &'static str, selected: &str) -> Mar
         label class="field" {
             span class="field-label" { (label) }
             select name=(name) {
-                (format_option(Format::Json.as_str(), "JSON / Data", selected))
-                (format_option(Format::Xml.as_str(), "XML / Markup", selected))
-                (format_option(Format::Text.as_str(), "Text", selected))
+                @for format in Format::ALL {
+                    (format_option(format.as_str(), format.label(), selected))
+                }
             }
         }
     }
@@ -308,9 +543,9 @@ fn editor_panel(
     html! {
         div class="editor-panel" {
             div class="editor-head" {
-                div {
+                div class="editor-title" {
                     h2 { (title) }
-                    p { (subtitle) }
+                    span { (subtitle) }
                 }
                 div class="panel-actions" {
                     (actions)
@@ -318,7 +553,7 @@ fn editor_panel(
             }
             div class="editor-frame" {
                 div class="gutter" aria-hidden="true" {
-                    @for line in 1..=stats.lines.max(1).min(99) {
+                    @for line in 1..=stats.lines.clamp(1, 99) {
                         span { (line) }
                     }
                 }
@@ -357,12 +592,33 @@ fn status_panel(status: StatusView<'_>) -> Markup {
                 span { "The output pane contains the rendered result." }
             }
         },
-        StatusView::Error(error) => html! {
-            div class="message problem" {
-                strong { "Conversion failed" }
-                span { (error) }
+        StatusView::Valid => html! {
+            div class="message ready" {
+                strong { "Valid" }
+                span { "The input satisfies the JSON Schema." }
             }
         },
+        StatusView::Error(error) => html! {
+            div class="message problem" role="alert" {
+                div class="error-heading" {
+                    strong { (error_title(error)) }
+                    span class="error-badge" { "Conversion failed" }
+                }
+                code { (error.to_string()) }
+            }
+        },
+    }
+}
+
+fn error_title(error: &ConvertError) -> &'static str {
+    match error {
+        ConvertError::Decoding(_) => "Input could not be decoded",
+        ConvertError::Encoding(_) => "Output could not be encoded",
+        ConvertError::InformationLoss(_) => "Conversion would lose information",
+        ConvertError::Validation(_) => "Object does not match the JSON Schema",
+        ConvertError::UnsupportedFormat(_) => "Unsupported format",
+        ConvertError::WrongArtifact { .. } => "Incompatible artifact",
+        ConvertError::InvalidConversion(_) => "Invalid conversion",
     }
 }
 
@@ -381,12 +637,7 @@ fn text_stats(value: &str) -> TextStats {
 }
 
 fn format_label(format: &str) -> &'static str {
-    match format {
-        "json" => "JSON",
-        "xml" => "XML",
-        "text" => "Text",
-        _ => "Unknown",
-    }
+    Format::try_from(format).map_or("Unknown", Format::label)
 }
 
 struct HttpRequest {
@@ -521,10 +772,21 @@ fn hex_value(byte: u8) -> Option<u8> {
 }
 
 fn normalize_format(format: &str) -> Result<Format, ConvertError> {
-    match format {
-        "json" => Ok(Format::Json),
-        "xml" => Ok(Format::Xml),
-        "text" => Ok(Format::Text),
-        value => Err(ConvertError::UnsupportedFormat(value.into())),
+    Format::try_from(format).map_err(|()| ConvertError::UnsupportedFormat(format.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{handle_form, validate_state};
+
+    #[test]
+    fn every_validation_preset_is_valid() {
+        for preset in ["json", "xml", "csv", "form", "tucana"] {
+            let body = format!("action=apply-validation-preset&validation-preset={preset}");
+            let state = handle_form(body.as_bytes());
+            validate_state(&state).unwrap_or_else(|error| {
+                panic!("validation preset {preset} failed: {error}");
+            });
+        }
     }
 }

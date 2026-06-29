@@ -16,17 +16,13 @@ impl Codec for XmlCodec {
         ArtifactKind::Markup
     }
 
-    fn decode(&self, input: &[u8], _ctx: &DecodeContext<'_>) -> Result<Artifact, ConvertError> {
+    fn decode(&self, input: &[u8], _ctx: &DecodeContext) -> Result<Artifact, ConvertError> {
         let input = std::str::from_utf8(input)
-            .map_err(|err| ConvertError::Parse(format!("xml is not valid utf-8: {err}")))?;
+            .map_err(|err| ConvertError::Decoding(format!("xml is not valid utf-8: {err}")))?;
         Ok(Artifact::Markup(parse_xml(input)?))
     }
 
-    fn encode(
-        &self,
-        artifact: &Artifact,
-        ctx: &EncodeContext<'_>,
-    ) -> Result<Vec<u8>, ConvertError> {
+    fn encode(&self, artifact: &Artifact, ctx: &EncodeContext) -> Result<Vec<u8>, ConvertError> {
         let Artifact::Markup(markup) = artifact else {
             return Err(ConvertError::WrongArtifact {
                 expected: ArtifactKind::Markup,
@@ -34,7 +30,7 @@ impl Codec for XmlCodec {
             });
         };
 
-        Ok(write_xml(markup).into_bytes())
+        Ok(write_xml(markup, ctx.pretty).into_bytes())
     }
 }
 
@@ -45,7 +41,7 @@ fn parse_xml(input: &str) -> Result<Markup, ConvertError> {
     parser.skip_misc()?;
 
     if !parser.is_eof() {
-        return Err(ConvertError::Parse(
+        return Err(ConvertError::Decoding(
             "xml can only have one root node".to_string(),
         ));
     }
@@ -155,7 +151,7 @@ impl<'a> XmlParser<'a> {
         let mut children = Vec::new();
         loop {
             if self.is_eof() {
-                return Err(ConvertError::Parse(format!(
+                return Err(ConvertError::Decoding(format!(
                     "missing closing tag for <{name}>"
                 )));
             }
@@ -167,7 +163,7 @@ impl<'a> XmlParser<'a> {
                 self.expect(">")?;
 
                 if closing != name {
-                    return Err(ConvertError::Parse(format!(
+                    return Err(ConvertError::Decoding(format!(
                         "expected closing tag </{name}>, found </{closing}>"
                     )));
                 }
@@ -195,9 +191,9 @@ impl<'a> XmlParser<'a> {
             .rest()
             .chars()
             .next()
-            .ok_or_else(|| ConvertError::Parse("expected attribute quote".to_string()))?;
+            .ok_or_else(|| ConvertError::Decoding("expected attribute quote".to_string()))?;
         if quote != '"' && quote != '\'' {
-            return Err(ConvertError::Parse(
+            return Err(ConvertError::Decoding(
                 "attribute value must be quoted".to_string(),
             ));
         }
@@ -213,7 +209,7 @@ impl<'a> XmlParser<'a> {
             self.bump(ch.len_utf8());
         }
 
-        Err(ConvertError::Parse(
+        Err(ConvertError::Decoding(
             "unterminated attribute value".to_string(),
         ))
     }
@@ -229,7 +225,7 @@ impl<'a> XmlParser<'a> {
         }
 
         if self.pos == start {
-            Err(ConvertError::Parse("expected XML name".to_string()))
+            Err(ConvertError::Decoding("expected XML name".to_string()))
         } else {
             Ok(self.input[start..self.pos].to_string())
         }
@@ -272,14 +268,14 @@ impl<'a> XmlParser<'a> {
             self.bump(expected.len());
             Ok(())
         } else {
-            Err(ConvertError::Parse(format!("expected {expected:?}")))
+            Err(ConvertError::Decoding(format!("expected {expected:?}")))
         }
     }
 
     fn take_until(&mut self, pattern: &str) -> Result<String, ConvertError> {
         let start = self.pos;
         let Some(offset) = self.rest().find(pattern) else {
-            return Err(ConvertError::Parse(format!(
+            return Err(ConvertError::Decoding(format!(
                 "expected terminator {pattern:?}"
             )));
         };
@@ -290,15 +286,15 @@ impl<'a> XmlParser<'a> {
     }
 }
 
-fn write_xml(markup: &Markup) -> String {
+fn write_xml(markup: &Markup, pretty: bool) -> String {
     let mut output = String::new();
-    write_node(&markup.root, 0, &mut output);
+    write_node(&markup.root, 0, pretty, &mut output);
     output
 }
 
-fn write_node(node: &MarkupNode, depth: usize, output: &mut String) {
+fn write_node(node: &MarkupNode, depth: usize, pretty: bool, output: &mut String) {
     match node {
-        MarkupNode::Element(element) => write_element(element, depth, output),
+        MarkupNode::Element(element) => write_element(element, depth, pretty, output),
         MarkupNode::Text(value) => output.push_str(&escape_text(value)),
         MarkupNode::CData(value) => {
             output.push_str("<![CDATA[");
@@ -318,7 +314,7 @@ fn write_node(node: &MarkupNode, depth: usize, output: &mut String) {
     }
 }
 
-fn write_element(element: &MarkupElement, depth: usize, output: &mut String) {
+fn write_element(element: &MarkupElement, depth: usize, pretty: bool, output: &mut String) {
     output.push('<');
     output.push_str(&element.name);
     for attribute in &element.attributes {
@@ -336,22 +332,26 @@ fn write_element(element: &MarkupElement, depth: usize, output: &mut String) {
 
     output.push('>');
 
-    let multiline = 
-        element
+    let multiline = pretty
+        && element
             .children
             .iter()
-            .any(|child| matches!(child, MarkupNode::Element(_)));
+            .all(|child| matches!(child, MarkupNode::Element(_)));
+
     if multiline {
         output.push('\n');
-    }
-
-    for child in &element.children {
-        write_node(child, depth + 1, output);
-    }
-
-    if multiline {
+        for child in &element.children {
+            output.push_str(&"  ".repeat(depth + 1));
+            write_node(child, depth + 1, pretty, output);
+            output.push('\n');
+        }
         output.push_str(&"  ".repeat(depth));
+    } else {
+        for child in &element.children {
+            write_node(child, depth + 1, pretty, output);
+        }
     }
+
     output.push_str("</");
     output.push_str(&element.name);
     output.push('>');
@@ -379,7 +379,9 @@ fn unescape_xml(input: &str) -> Result<String, ConvertError> {
         rest = &rest[index + 1..];
 
         let Some(end) = rest.find(';') else {
-            return Err(ConvertError::Parse("unterminated XML entity".to_string()));
+            return Err(ConvertError::Decoding(
+                "unterminated XML entity".to_string(),
+            ));
         };
         let entity = &rest[..end];
         match entity {
@@ -389,7 +391,7 @@ fn unescape_xml(input: &str) -> Result<String, ConvertError> {
             "quot" => output.push('"'),
             "apos" => output.push('\''),
             _ => {
-                return Err(ConvertError::Parse(format!(
+                return Err(ConvertError::Decoding(format!(
                     "unsupported XML entity: &{entity};"
                 )));
             }
@@ -408,9 +410,7 @@ mod tests {
     #[test]
     fn xml_codec_decodes_and_encodes_elements() {
         let codec = XmlCodec;
-        let ctx = DecodeContext {
-            schema: None,
-        };
+        let ctx = DecodeContext;
         let artifact = codec
             .decode(br#"<user id="7"><name>Ada</name></user>"#, &ctx)
             .unwrap();
@@ -439,17 +439,10 @@ mod tests {
     #[test]
     fn xml_codec_preserves_comments_when_encoding_markup() {
         let codec = XmlCodec;
-        let ctx = DecodeContext {
-            schema: None,
-        };
+        let ctx = DecodeContext;
         let artifact = codec.decode(b"<root><!--x--></root>", &ctx).unwrap();
         let encoded = codec
-            .encode(
-                &artifact,
-                &EncodeContext {
-                    schema: None,
-                },
-            )
+            .encode(&artifact, &EncodeContext { pretty: false })
             .unwrap();
 
         assert_eq!(String::from_utf8(encoded).unwrap(), "<root><!--x--></root>");

@@ -2,6 +2,16 @@
 name = "lupus"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Artifact-based conversion between JSON, XML, CSV, HTTP forms, text, and Protobuf"
+keywords = ["conversion", "json", "xml", "protobuf", "csv"]
+categories = ["encoding", "parser-implementations"]
 
 [dependencies]
+jsonschema.workspace = true
 serde_json.workspace = true
+tucana.workspace = true
