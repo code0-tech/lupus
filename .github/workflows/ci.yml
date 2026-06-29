@@ -61,19 +61,33 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify tag matches crate version
+      - name: Set crate version from tag
         shell: bash
         run: |
           set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          if [[ ! "$tag_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag $GITHUB_REF_NAME is not a valid crate version" >&2
+            exit 1
+          fi
+
+          sed -i \
+            "s/^version = \".*\"$/version = \"$tag_version\"/" \
+            Cargo.toml
+
+          # Refresh workspace package versions recorded in Cargo.lock without
+          # changing locked dependency versions.
+          cargo update -p lupus --precise "$tag_version"
+
           crate_version="$(cargo metadata --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "lupus") | .version')"
-          tag_version="${GITHUB_REF_NAME#v}"
           if [[ "$tag_version" != "$crate_version" ]]; then
             echo "Tag $GITHUB_REF_NAME does not match lupus version $crate_version" >&2
             exit 1
           fi
 
       - name: Publish to crates.io
-        run: cargo publish -p lupus --locked
+        run: cargo publish -p lupus --locked --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
