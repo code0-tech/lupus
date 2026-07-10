@@ -5,7 +5,9 @@ use crate::codec::Codec;
 use crate::data::Data;
 use crate::error::ConvertError;
 use crate::format::Format;
-use crate::formats::{CsvCodec, HttpFormCodec, JsonCodec, ProtobufCodec, TextCodec, XmlCodec};
+use crate::formats::{
+    CsvCodec, HtmlCodec, HttpFormCodec, JsonCodec, ProtobufCodec, TextCodec, XmlCodec,
+};
 use crate::schema::{DecodeContext, EncodeContext, JsonSchema};
 use crate::transform::{data_into_markup, data_to_text, markup_into_data, markup_to_text};
 use crate::validation::validate_json_schema;
@@ -24,6 +26,7 @@ impl Engine {
         let mut engine = Self::new();
         engine.register(JsonCodec);
         engine.register(XmlCodec);
+        engine.register(HtmlCodec);
         engine.register(TextCodec);
         engine.register(CsvCodec);
         engine.register(HttpFormCodec);
@@ -177,6 +180,21 @@ mod tests {
 
         let result = engine.convert(&xml, Format::Xml, Format::Json, &decode_ctx, &encode_ctx)?;
         assert_eq!(result, json);
+        Ok(())
+    }
+
+    #[test]
+    fn json_converts_to_html_markup() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = Engine::with_default_codecs();
+        let html = engine.convert(
+            br#"{"article":{"h1":"Hello","p":"World"}}"#,
+            Format::Json,
+            Format::Html,
+            &DecodeContext,
+            &EncodeContext::default(),
+        )?;
+
+        assert_eq!(html, b"<article><h1>Hello</h1><p>World</p></article>");
         Ok(())
     }
 
