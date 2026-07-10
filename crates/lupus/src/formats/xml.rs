@@ -34,7 +34,7 @@ impl Codec for XmlCodec {
     }
 }
 
-fn parse_xml(input: &str) -> Result<Markup, ConvertError> {
+pub(crate) fn parse_xml(input: &str) -> Result<Markup, ConvertError> {
     let mut parser = XmlParser::new(input);
     parser.skip_misc()?;
     let root = parser.parse_node()?;
@@ -286,7 +286,7 @@ impl<'a> XmlParser<'a> {
     }
 }
 
-fn write_xml(markup: &Markup, pretty: bool) -> String {
+pub(crate) fn write_xml(markup: &Markup, pretty: bool) -> String {
     let mut output = String::new();
     write_node(&markup.root, 0, pretty, &mut output);
     output

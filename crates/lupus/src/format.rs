@@ -4,6 +4,7 @@ pub const TEXT: &str = "text";
 pub const PROTOBUF: &str = "protobuf";
 pub const CSV: &str = "csv";
 pub const HTTP_FORM: &str = "http-form";
+pub const HTML: &str = "html";
 pub const XML: &str = "xml";
 pub const JSON: &str = "json";
 
@@ -13,14 +14,16 @@ pub enum Format {
     Protobuf,
     Csv,
     HttpForm,
+    Html,
     Xml,
     Json,
 }
 
 impl Format {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Json,
         Self::Xml,
+        Self::Html,
         Self::Text,
         Self::Csv,
         Self::HttpForm,
@@ -33,6 +36,7 @@ impl Format {
             Format::Protobuf => PROTOBUF,
             Format::Csv => CSV,
             Format::HttpForm => HTTP_FORM,
+            Format::Html => HTML,
             Format::Xml => XML,
             Format::Json => JSON,
         }
@@ -42,6 +46,7 @@ impl Format {
         match self {
             Format::Json => "JSON",
             Format::Xml => "XML",
+            Format::Html => "HTML",
             Format::Text => "Text",
             Format::Csv => "CSV",
             Format::HttpForm => "HTTP Form",
